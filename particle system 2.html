@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Particle System with Black Hole Merging</title>
+<style>
+  body, html {
+    height: 100%;
+    margin: 0;
+    background: black;
+    overflow: hidden;
+  }
+  canvas {
+    display: block;
+    position: absolute;
+    top: 0;
+    left: 0;
+  }
+  .controls {
+    position: fixed;
+    top: 10px;
+    left: 10px;
+    color: #0f0;
+    font-family: 'Arial', sans-serif;
+  }
+  label {
+    display: block;
+    margin-bottom: 10px;
+  }
+  input[type="range"] {
+    cursor: pointer;
+    width: 300px;
+    background: #333;
+    outline: none;
+    opacity: 0.7;
+    transition: opacity 0.2s;
+  }
+  input[type="range"]:hover {
+    opacity: 1;
+  }
+</style>
+</head>
+<body>
+<canvas id="canvas"></canvas>
+<div class="controls">
+  <label>Velocity: <input type="range" id="velocity" min="1" max="10" value="5"></label>
+  <label>Gravity: <input type="range" id="gravity" min="-1" max="1" step="0.1" value="0.1"></label>
+  <label>Quantity: <input type="range" id="quantity" min="10" max="50" value="30"></label>
+  <label>Size: <input type="range" id="size" min="1" max="10" value="3"></label>
+  <label>Bounciness: <input type="range" id="bounciness" min="0" max="1" step="0.1" value="0.6"></label>
+</div>
+<script>
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+canvas.width = window.innerWidth;
+canvas.height = window.innerHeight;
+
+let particles = [];
+let blackHoles = [];
+
+class Particle {
+    constructor() {
+        this.x = Math.random() * canvas.width;
+        this.y = Math.random() * canvas.height;
+        this.velocity = {
+            x: (Math.random() - 0.5) * 2 * document.getElementById('velocity').value,
+            y: (Math.random() - 0.5) * 2 * document.getElementById('velocity').value
+        };
+        this.radius = parseFloat(document.getElementById('size').value);
+        this.color = `hsl(${Math.random() * 360}, 100%, 50%)`;
+        this.mass = this.radius;
+        this.isDestroyed = false;
+    }
+
+    draw() {
+        if (!this.isDestroyed) {
+            ctx.beginPath();
+            ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2, false);
+            ctx.fillStyle = this.color;
+            ctx.fill();
+            ctx.shadowBlur = 15;
+            ctx.shadowColor = this.color;
+        }
+    }
+
+    update() {
+        if (!this.isDestroyed) {
+            if (this.x + this.radius < 0 || this.x - this.radius > canvas.width || this.y + this.radius < 0 || this.y - this.radius > canvas.height) {
+                this.isDestroyed = true; // Mark particle for removal if it goes out of bounds
+                return;
+            }
+            this.applyForces();
+            this.move();
+            this.draw();
+        }
+    }
+
+    applyForces() {
+        blackHoles.forEach(hole => {
+            let dx = hole.x - this.x;
+            let dy = hole.y - this.y;
+            let distance = Math.sqrt(dx * dx + dy * dy);
+            if (distance < hole.radius + 5) {
+                this.isDestroyed = true; // Particle is absorbed by black hole
+            } else {
+                let forceDirection = Math.atan2(dy, dx);
+                let forceMagnitude = (hole.mass * this.mass) / (distance * distance);
+                let forceX = Math.cos(forceDirection) * forceMagnitude;
+                let forceY = Math.sin(forceDirection) * forceMagnitude;
+                this.velocity.x += forceX;
+                this.velocity.y += forceY;
+            }
+        });
+    }
+
+    move() {
+        this.x += this.velocity.x;
+        this.y += this.velocity.y;
+    }
+}
+
+class BlackHole {
+    constructor(x, y) {
+        this.x = x;
+        this.y = y;
+        this.radius = 20;
+        this.mass = 10000;
+    }
+
+    draw() {
+        ctx.beginPath();
+        ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2, false);
+        ctx.fillStyle = 'black';
+        ctx.fill();
+        ctx.shadowBlur = 30;
+        ctx.shadowColor = 'white';
+    }
+
+    attract(other) {
+        let dx = other.x - this.x;
+        let dy = other.y - this.y;
+        let distance = Math.sqrt(dx * dx + dy * dy);
+        if (distance < this.radius + other.radius) {
+            this.merge(other);
+        } else {
+            let forceDirection = Math.atan2(dy, dx);
+            let forceMagnitude = (this.mass * other.mass) / (distance * distance);
+            let forceX = Math.cos(forceDirection) * forceMagnitude;
+            let forceY = Math.sin(forceDirection) * forceMagnitude;
+            this.x += forceX / this.mass;
+            this.y += forceY / this.mass;
+            other.x -= forceX / other.mass;
+            other.y -= forceY / other.mass;
+        }
+    }
+
+    merge(other) {
+        if (!other.isMerged) {
+            this.mass += other.mass;
+            this.radius += other.radius * 0.5;
+            other.isMerged = true;
+        }
+    }
+}
+
+function init() {
+    particles = [];
+    blackHoles = [];
+    const quantity = parseInt(document.getElementById('quantity').value);
+    for (let i = 0; i < quantity; i++) {
+        particles.push(new Particle());
+    }
+}
+
+function animate() {
+    requestAnimationFrame(animate);
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    particles = particles.filter(particle => !particle.isDestroyed); // Remove destroyed particles
+    blackHoles = blackHoles.filter(hole => !hole.isMerged); // Remove merged black holes
+    while (particles.length < parseInt(document.getElementById('quantity').value)) {
+        particles.push(new Particle()); // Add new particles to maintain the count
+    }
+    particles.forEach(particle => particle.update());
+    blackHoles.forEach(hole => hole.draw());
+    attractBlackHoles();
+    checkCollisions();
+}
+
+function checkCollisions() {
+    for (let i = 0; i < particles.length - 1; i++) {
+        for (let j = i + 1; j < particles.length; j++) {
+            let dx = particles[i].x - particles[j].x;
+            let dy = particles[i].y - particles[j].y;
+            let distance = Math.sqrt(dx * dx + dy * dy);
+            if (distance < particles[i].radius + particles[j].radius && blackHoles.length < 5) {
+                createBlackHole((particles[i].x + particles[j].x) / 2, (particles[i].y + particles[j].y) / 2);
+                particles[i].isDestroyed = true;
+                particles[j].isDestroyed = true;
+            }
+        }
+    }
+}
+
+function createBlackHole(x, y) {
+    if (blackHoles.length < 5) {
+        blackHoles.push(new BlackHole(x, y));
+    }
+}
+
+function attractBlackHoles() {
+    for (let i = 0; i < blackHoles.length; i++) {
+        for (let j = i + 1; j < blackHoles.length; j++) {
+            blackHoles[i].attract(blackHoles[j]);
+        }
+    }
+}
+
+init();
+animate();
+
+window.addEventListener('resize', () => {
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+    init();
+});
+
+document.querySelectorAll('input[type=range]').forEach(item => {
+    item.addEventListener('input', init);
+});
+</script>
+</body>
+</html>
